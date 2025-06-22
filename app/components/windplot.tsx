@@ -203,11 +203,15 @@ export default function GlobeWindMap() {
         for (let i = 0; i < closed.length - 1; i++) pushSeg(closed[i], closed[i + 1]);
       };
 
-      geos.forEach((g: Feature<Geometry, GeoJsonProperties>) =>
-        g.geometry.type === "Polygon"
-          ? (g.geometry.coordinates as number[][][]).forEach(ring)
-          : (g.geometry.coordinates as number[][][][]).forEach(p => p.forEach(ring))
-      );
+      geos.forEach((g: Feature<Geometry, GeoJsonProperties>) => {
+      const { geometry } = g;
+      if (geometry.type === "Polygon") {
+        geometry.coordinates.forEach(ring);
+      } else if (geometry.type === "MultiPolygon") {
+        geometry.coordinates.forEach(polygon => polygon.forEach(ring));
+      }
+    });
+
 
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
