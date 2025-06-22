@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { feature } from "topojson-client";
-import type { FeatureCollection, Geometry, GeoJsonProperties } from "geojson";
+import type { Feature, FeatureCollection, Geometry, GeoJsonProperties } from "geojson";
 
 const DATA_DIR = "/data/winddata";
 const MANIFEST_URL = `${DATA_DIR}/wind_uv_manifest_20250622_00z.json`;
@@ -57,6 +57,23 @@ interface GridMeta {
   dy: number;
 }
 
+interface WindHeader {
+  nx: number;
+  ny: number;
+  lo1: number;
+  la1: number;
+  dx: number;
+  dy: number;
+  surface1Type: number;
+  surface1Value: number;
+  // add more properties if you expect them!
+}
+
+interface WindObj {
+  header: WindHeader;
+  data: number[];
+}
+
 export default function GlobeWindMap() {
   const [levels, setLevels] = useState<
     { label: string; U: Float32Array; V: Float32Array; S: Float32Array }[]
@@ -67,8 +84,6 @@ export default function GlobeWindMap() {
 
   // ---- LOAD DATA ---- //
   useEffect(() => {
-    interface WindObj { header: any; data: number[]; }
-
     // 1. Fetch manifest listing all per-level files
     fetch(MANIFEST_URL)
       .then(r => r.json())
@@ -188,7 +203,7 @@ export default function GlobeWindMap() {
         for (let i = 0; i < closed.length - 1; i++) pushSeg(closed[i], closed[i + 1]);
       };
 
-      geos.forEach((g: any) =>
+      geos.forEach((g: Feature<Geometry, GeoJsonProperties>) =>
         g.geometry.type === "Polygon"
           ? (g.geometry.coordinates as number[][][]).forEach(ring)
           : (g.geometry.coordinates as number[][][][]).forEach(p => p.forEach(ring))
@@ -341,36 +356,6 @@ export default function GlobeWindMap() {
       });
     };
 
-    // --------------- LEGEND (colour scale) --------------- //
-    // const legend = document.createElement("canvas");
-    // legend.width = 300;
-    // legend.height = 40;
-    // legend.style.cssText = "position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:20";
-    // wrap.current.appendChild(legend);
-
-    // const lgCtx = legend.getContext("2d")!;
-    // // gradient bar
-    // for (let x = 0; x < legend.width; x++) {
-    //   // Use gamma curve for legend too!
-    //   const speed = Math.pow(x / legend.width, 1 / GAMMA) * MAX_WIND_KMH;
-    //   const [r, g, b] = colorForSpeed(speed);
-    //   lgCtx.fillStyle = `rgb(${r},${g},${b})`;
-    //   lgCtx.fillRect(x, 0, 1, 20);
-    // }
-    // // ticks & labels
-    // lgCtx.fillStyle = "#fff";
-    // lgCtx.font = "12px sans-serif";
-    // lgCtx.textAlign = "center";
-    // lgCtx.textBaseline = "top";
-    // const ticks = 5;
-    // for (let i = 0; i <= ticks; i++) {
-    //   const frac = i / ticks;
-    //   const x = Math.pow(frac, GAMMA) * legend.width;
-    //   const label = Math.round(frac * MAX_WIND_KMH).toString();
-    //   lgCtx.fillRect(x, 20, 1, 4);
-    //   lgCtx.fillText(label, x, 26);
-    // }
-
     // --------------- ANIMATION LOOP --------------- //
     let raf = 0;
     const loop = () => {
@@ -390,7 +375,6 @@ export default function GlobeWindMap() {
       renderer.dispose();
       wrap.current?.removeChild(renderer.domElement);
       wrap.current?.removeChild(windCanvas);
-      // wrap.current?.removeChild(legend);
     };
   }, [levels, lvlIdx]);
 
