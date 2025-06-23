@@ -26,9 +26,16 @@ const GAMMA = 0.5;
  * Nullschool-style wind colour ramp.
  */
 const WIND_COLOR_SCALE: [number, number, number][] = [
-  [36, 104, 180], [60, 157, 194], [128, 205, 193], [151, 218, 168], [198, 231, 181],
-  [238, 247, 217], [255, 238, 159], [252, 217, 125], [255, 182, 100], [252, 150, 75],
-  [250, 112, 52], [245, 84, 32], [237, 45, 28], [220, 24, 32], [180, 0, 35],
+  [15, 32, 128],    // deep blue
+  [30, 100, 180],   // rich blue
+  [41, 180, 232],   // cyan-blue
+  [38, 211, 75],    // green
+  [255, 255, 84],   // yellow
+  [255, 153, 18],   // orange
+  [255, 62, 62],    // red
+  [178, 34, 34],    // dark red
+  [143, 32, 136],   // violet
+  [255, 255, 255],  // white for extremes
 ];
 
 /** Gamma-corrected color scale for perceptual smoothness. */
@@ -381,6 +388,8 @@ export default function GlobeWindMap() {
       wrap.current?.removeChild(windCanvas);
     };
   }, [levels, lvlIdx]);
+
+
 
   // ---- UI: level selector ---- //
   const onLevelChange = (e: React.ChangeEvent<HTMLSelectElement>) => setLvlIdx(Number(e.target.value));
