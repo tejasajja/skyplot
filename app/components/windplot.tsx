@@ -15,7 +15,6 @@ const GLOBE_RADIUS = 200;
 const PARTICLE_COUNT = 20000;
 const PARTICLE_LIFE = 601;
 const SPEED_FACTOR = 0.008;
-const MAX_WIND_KMH = 150;
 const TRAIL_FADE = 0.92;
 const SIGNIFICANT_CAM_MOVE2 = 4;
 
@@ -27,9 +26,6 @@ const TEMP_OVERLAY_ALPHA = 0.35;
 // Air mode overlay settings
 const OVERLAY_ALPHA = 0.4;
 const AIR_MODE_ENABLED = true;
-
-// Try 0.4–0.7 for different effects!
-const GAMMA = 0.5;
 
 /**
  * Nullschool Earth exact wind speed color mapping - uses extendedSinebowColor algorithm
@@ -98,13 +94,6 @@ const windSpeedColorScale = (windSpeedMs: number, alpha: number = 1): [number, n
   
   // Use Nullschool's extendedSinebowColor function
   return extendedSinebowColor(normalized, Math.floor(alpha * 255));
-};
-
-/** Gamma-corrected color scale for perceptual smoothness. */
-const colorForSpeed = (speedKmh: number): [number, number, number] => {
-  const speedMs = speedKmh / 3.6; // Convert km/h to m/s
-  const [r, g, b] = windSpeedColorScale(speedMs, 1);
-  return [r, g, b];
 };
 
 const lonLatToVec3 = (lon: number, lat: number, r = GLOBE_RADIUS) => {
@@ -335,8 +324,8 @@ export default function GlobeWindMap() {
   useEffect(() => {
     if (!wrap.current || !levels.length || !gridMeta.current) return;
 
-    const { nx, ny, lo1, la1, dx, dy } = gridMeta.current;
-    const { U, V, S } = levels[lvlIdx];
+    const { nx, lo1, la1, dx, dy } = gridMeta.current;
+    const { U, V } = levels[lvlIdx];
 
     const scene = new THREE.Scene();
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -571,7 +560,7 @@ export default function GlobeWindMap() {
     };
 
     // STREAMLINES colored by local wind speed!
-    const trailColor = (u: number, v: number) => {
+    const trailColor = () => {
       // Make wind particles more visible when temperature overlay is active
       if (overlayMode === 'temperature') {
         return "rgba(255,255,255,0.9)"; // Brighter white for better visibility over temperature
@@ -761,7 +750,7 @@ export default function GlobeWindMap() {
                     
                     // FIXED: Simplified and consistent longitude handling
                     // Convert longitude to 0-360 range consistently
-                    let normLon = ((lon + 360) % 360);
+                    const normLon = ((lon + 360) % 360);
                     
                     // Convert grid longitude origin to 0-360 range for consistency
                     let gridLo1 = tempLo1;
@@ -956,7 +945,7 @@ export default function GlobeWindMap() {
         prevXY[2 * i + 1] = sy1;
 
         if (!isNaN(sx0) && Math.hypot(sx1 - sx0, sy1 - sy0) <= sMin) {
-          ctx.strokeStyle = trailColor(u, v);
+          ctx.strokeStyle = trailColor();
           ctx.globalAlpha = Math.min(1.0, 0.1 + (PARTICLE_LIFE - p.age) / PARTICLE_LIFE * 0.9); // Fade with age
           ctx.beginPath();
           ctx.moveTo(sx0, sy0);
@@ -989,24 +978,28 @@ export default function GlobeWindMap() {
 
     // --------------- CLEAN-UP --------------- //
     return () => {
-      cancelAnimationFrame(raf);
+      // Capture the current value of wrap.current to avoid stale closure
+      const currentWrap = wrap.current;
+      
+      if (raf) cancelAnimationFrame(raf);
       clearTimeout(moveTimeout);
       clearTimeout(controlsChangeTimeout);
       window.removeEventListener("resize", resize);
       controls.dispose();
       renderer.dispose();
-      wrap.current?.removeChild(renderer.domElement);
-      wrap.current?.removeChild(windCanvas);
-      wrap.current?.removeChild(overlayCanvas);
+      currentWrap?.removeChild(renderer.domElement);
+      currentWrap?.removeChild(windCanvas);
+      currentWrap?.removeChild(overlayCanvas);
     };
   }, [levels, lvlIdx, renderTrigger]);
 
   // ---- UI: air mode toggle ---- //
-  const toggleAirMode = () => {
-    setAirModeEnabled(!airModeEnabled);
-    // Trigger a re-render of the air mode overlay
-    setRenderTrigger(prev => prev + 1);
-  };
+  // This function could be used for manual air mode toggling but is currently handled automatically
+  // const toggleAirMode = () => {
+  //   setAirModeEnabled(!airModeEnabled);
+  //   // Trigger a re-render of the air mode overlay
+  //   setRenderTrigger(prev => prev + 1);
+  // };
 
   // ---- UI: overlay mode selector ---- //
   const [dashOpen, setDashOpen] = useState(false);
@@ -1086,9 +1079,6 @@ export default function GlobeWindMap() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [dashOpen, levels.length]);
-
-  const onAltitudeChange = (e: React.ChangeEvent<HTMLSelectElement>) => setLvlIdx(Number(e.target.value));
-  const altitudeLabel = levels[lvlIdx]?.label || '';
 
   return (
     <>
