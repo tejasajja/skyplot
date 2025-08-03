@@ -339,11 +339,11 @@ export default function GlobeWindMap() {
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05; // Reduced for more responsive controls
+    controls.dampingFactor = 0.08; // Slightly increased for smoother rotation
     controls.minDistance = 250;
     controls.maxDistance = 800;
-    controls.zoomSpeed = 1.2; // Slightly faster zoom
-    controls.rotateSpeed = 1.0;
+    controls.zoomSpeed = 1.0; // More controlled zoom
+    controls.rotateSpeed = 0.8; // Slightly slower for more precise control
 
     // Simplified movement detection using controls events only
     let controlsChangeTimeout: NodeJS.Timeout;
@@ -369,14 +369,20 @@ export default function GlobeWindMap() {
 
     // --------------- WIND SPEED OVERLAY CANVAS --------------- //
     const overlayCanvas = document.createElement("canvas");
-    overlayCanvas.style.cssText = "position:absolute;inset:0;pointer-events:none";
+    overlayCanvas.style.cssText = "position:absolute;inset:0;pointer-events:none;transition:opacity 0.1s ease-out";
     wrap.current.appendChild(overlayCanvas);
 
     const overlayCtx = overlayCanvas.getContext("2d")!;
 
-    // Movement tracking variables  
+    // Movement tracking variables with improved state management
     let isMoving = false;
     let moveTimeout: NodeJS.Timeout;
+    let isRendering = false;
+    let pendingRender = false;
+    let lastRenderTime = 0;
+    const MIN_RENDER_INTERVAL = 100; // Reduced minimum interval for faster updates
+    let fadeTimeout: NodeJS.Timeout;
+    let overlayFadeLevel = 1.0; // Track overlay opacity for smooth transitions
 
     // --------------- RESIZE HANDLER --------------- //
     const resize = () => {
@@ -389,11 +395,17 @@ export default function GlobeWindMap() {
       overlayCanvas.width = w;
       overlayCanvas.height = h;
       ctx.clearRect(0, 0, w, h);
-      overlayCtx.clearRect(0, 0, w, h);
       
-      // Re-render overlay after resize
+      // Don't clear overlay during resize - just mark for re-render
       if ((airModeEnabled || overlayMode === 'temperature') && !isMoving) {
-        setTimeout(() => renderAirModeOverlay(), 100);
+        setTimeout(() => {
+          if (!isMoving) {
+            // Reset opacity before rendering
+            overlayFadeLevel = 1.0;
+            overlayCanvas.style.opacity = '1.0';
+            renderAirModeOverlay();
+          }
+        }, 100);
       }
     };
     resize();
@@ -577,58 +589,150 @@ export default function GlobeWindMap() {
 
     const lastCamPos = camera.position.clone();
     const lastCamTarget = controls.target.clone();
+    const lastCamQuaternion = camera.quaternion.clone();
     
     const cameraMoved = () => {
-      return camera.position.distanceToSquared(lastCamPos) > SIGNIFICANT_CAM_MOVE2 || 
-             controls.target.distanceToSquared(lastCamTarget) > SIGNIFICANT_CAM_MOVE2;
+      const posChanged = camera.position.distanceToSquared(lastCamPos) > SIGNIFICANT_CAM_MOVE2;
+      const targetChanged = controls.target.distanceToSquared(lastCamTarget) > SIGNIFICANT_CAM_MOVE2;
+      const rotChanged = camera.quaternion.angleTo(lastCamQuaternion) > 0.02; // ~1 degree
+      
+      return posChanged || targetChanged || rotChanged;
     };
     
     const handleCamMove = () => {
-      // Clear particles canvas
-      ctx.clearRect(0, 0, windCanvas.width, windCanvas.height);
+      // Clear particles canvas immediately but more gently
+      const fadeParticles = () => {
+        ctx.save();
+        ctx.globalCompositeOperation = "destination-in";
+        ctx.fillStyle = "rgba(0,0,0,0.7)"; // Faster but not instant clear
+        ctx.fillRect(0, 0, windCanvas.width, windCanvas.height);
+        ctx.restore();
+      };
+      fadeParticles();
+      
       prevXY.fill(NaN);
       lastCamPos.copy(camera.position);
       lastCamTarget.copy(controls.target);
+      lastCamQuaternion.copy(camera.quaternion);
       
-      // Mark as moving and clear overlay
+      // Don't clear overlay immediately - instead fade it out gradually
       isMoving = true;
-      overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+      
+      // Start fading out the overlay smoothly
+      if ((airModeEnabled || overlayMode === 'temperature') && overlayFadeLevel > 0.3) {
+        clearTimeout(fadeTimeout);
+        const fadeStep = () => {
+          overlayFadeLevel = Math.max(0.3, overlayFadeLevel - 0.08); // Faster fade
+          overlayCanvas.style.opacity = overlayFadeLevel.toString();
+          
+          if (overlayFadeLevel > 0.3 && isMoving) {
+            fadeTimeout = setTimeout(fadeStep, 12); // Faster fade rate
+          }
+        };
+        fadeStep();
+      }
       
       clearTimeout(moveTimeout);
       
       // Set timeout to render overlay after movement stops
       moveTimeout = setTimeout(() => {
         isMoving = false;
-        if (airModeEnabled || overlayMode === 'temperature') {
+        if ((airModeEnabled || overlayMode === 'temperature') && !isRendering) {
           renderAirModeOverlay();
         }
-      }, 150); // Longer delay to ensure movement has completely stopped
+      }, 200); // Reduced delay for faster response
     };
 
-    // Use controls change event for movement detection
+    // Improved controls change event with better debouncing
+    let controlsChangeDebounce: NodeJS.Timeout;
+    let isRotating = false;
+    
+    controls.addEventListener('start', () => {
+      isRotating = true;
+      // Immediately start fading overlay when rotation begins
+      if ((airModeEnabled || overlayMode === 'temperature') && overlayFadeLevel > 0.4) {
+        clearTimeout(fadeTimeout);
+        const fastFade = () => {
+          overlayFadeLevel = Math.max(0.4, overlayFadeLevel - 0.12); // Much faster fade
+          overlayCanvas.style.opacity = overlayFadeLevel.toString();
+          
+          if (overlayFadeLevel > 0.4 && isRotating) {
+            fadeTimeout = setTimeout(fastFade, 10); // Even faster fade rate
+          }
+        };
+        fastFade();
+      }
+    });
+    
+    controls.addEventListener('end', () => {
+      isRotating = false;
+      // Start timer to re-render overlay after rotation ends
+      clearTimeout(moveTimeout);
+      moveTimeout = setTimeout(() => {
+        isMoving = false;
+        if ((airModeEnabled || overlayMode === 'temperature') && !isRendering) {
+          renderAirModeOverlay();
+        }
+      }, 150); // Faster response
+    });
+    
     controls.addEventListener('change', () => {
-      clearTimeout(controlsChangeTimeout);
-      controlsChangeTimeout = setTimeout(() => {
+      clearTimeout(controlsChangeDebounce);
+      controlsChangeDebounce = setTimeout(() => {
         if (cameraMoved()) {
           handleCamMove();
         }
-      }, 5); // Very short debounce
+      }, 3); // Even more responsive debounce
     });
 
     // --------------- AIR MODE OVERLAY RENDERING --------------- //
     const renderAirModeOverlay = () => {
-      if ((!airModeEnabled && overlayMode !== 'temperature') || isMoving) return;
+      if ((!airModeEnabled && overlayMode !== 'temperature') || isRendering) return;
+      
+      // Throttle rendering to prevent excessive calls
+      const now = Date.now();
+      if (now - lastRenderTime < MIN_RENDER_INTERVAL) {
+        if (!pendingRender) {
+          pendingRender = true;
+          setTimeout(() => {
+            pendingRender = false;
+            if (!isRendering) {
+              renderAirModeOverlay();
+            }
+          }, MIN_RENDER_INTERVAL - (now - lastRenderTime));
+        }
+        return;
+      }
+      
+      isRendering = true;
+      lastRenderTime = now;
+      setIsOverlayLoading(true);
+      
+      // Clear any fade timeout
+      clearTimeout(fadeTimeout);
+      
       requestAnimationFrame(() => {
-        if ((!airModeEnabled && overlayMode !== 'temperature') || isMoving) return;
+        if ((!airModeEnabled && overlayMode !== 'temperature')) {
+          isRendering = false;
+          setIsOverlayLoading(false);
+          return;
+        }
+        
         const { width, height } = overlayCanvas;
         const ctx = overlayCtx;
-        ctx.clearRect(0, 0, width, height);
+        
+        // Use double buffering approach - create off-screen canvas
+        const offscreenCanvas = document.createElement('canvas');
+        offscreenCanvas.width = width;
+        offscreenCanvas.height = height;
+        const offscreenCtx = offscreenCanvas.getContext('2d')!;;
+        
         const camDir = camera.position.clone().normalize();
         const baseStep = overlayMode === 'temperature' ? 
           Math.max(1, Math.floor(Math.min(width, height) / 800)) : // Higher resolution for temperature
           Math.max(1, Math.floor(Math.min(width, height) / 600));   // Improved resolution for wind
         const step = baseStep;
-        const imageData = ctx.createImageData(width, height);
+        const imageData = offscreenCtx.createImageData(width, height);
         const data = imageData.data;
         for (let x = 0; x < width; x += step) {
           for (let y = 0; y < height; y += step) {
@@ -891,16 +995,46 @@ export default function GlobeWindMap() {
             }
           }
         }
-        ctx.putImageData(imageData, 0, 0);
+        
+        // Apply the rendered image data to off-screen canvas
+        offscreenCtx.putImageData(imageData, 0, 0);
+        
+        // Only update the main canvas when rendering is complete
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(offscreenCanvas, 0, 0);
+        
+        // Smoothly fade in the overlay
+        if (!isMoving) {
+          overlayFadeLevel = 1.0;
+          overlayCanvas.style.opacity = '1.0';
+        }
+        
+        setIsOverlayLoading(false);
+        isRendering = false;
       });
     };
 
     const updateParticles = () => {
-      ctx.save();
-      ctx.globalCompositeOperation = "destination-in";
-      ctx.fillStyle = `rgba(0,0,0,${TRAIL_FADE})`;
-      ctx.fillRect(0, 0, windCanvas.width, windCanvas.height);
-      ctx.restore();
+      // During rapid movement, reduce update frequency but don't completely stop
+      if (isMoving || isRotating) {
+        // Lighter fade during movement for smoother appearance
+        ctx.save();
+        ctx.globalCompositeOperation = "destination-in";
+        ctx.fillStyle = `rgba(0,0,0,${TRAIL_FADE * 0.85})`; // Slower fade during movement
+        ctx.fillRect(0, 0, windCanvas.width, windCanvas.height);
+        ctx.restore();
+        
+        // Skip some particle updates during movement to improve performance
+        if (Math.random() > 0.3) return;
+      } else {
+        // Normal fade when stationary
+        ctx.save();
+        ctx.globalCompositeOperation = "destination-in";
+        ctx.fillStyle = `rgba(0,0,0,${TRAIL_FADE})`;
+        ctx.fillRect(0, 0, windCanvas.width, windCanvas.height);
+        ctx.restore();
+      }
+      
       ctx.globalCompositeOperation = "lighter";
 
       const camDir = camera.position.clone().normalize();
@@ -971,6 +1105,9 @@ export default function GlobeWindMap() {
     if (airModeEnabled || overlayMode === 'temperature') {
       setTimeout(() => {
         if (!isMoving) {
+          // Initialize overlay opacity
+          overlayFadeLevel = 1.0;
+          overlayCanvas.style.opacity = '1.0';
           renderAirModeOverlay();
         }
       }, 500);
@@ -983,7 +1120,8 @@ export default function GlobeWindMap() {
       
       if (raf) cancelAnimationFrame(raf);
       clearTimeout(moveTimeout);
-      clearTimeout(controlsChangeTimeout);
+      clearTimeout(fadeTimeout);
+      clearTimeout(controlsChangeDebounce);
       window.removeEventListener("resize", resize);
       controls.dispose();
       renderer.dispose();
@@ -1006,6 +1144,7 @@ export default function GlobeWindMap() {
   const [overlayMode, setOverlayMode] = useState<'wind' | 'temperature' | 'none'>('wind');
   const [legendHover, setLegendHover] = useState<number | null>(null);
   const [altitudeHover, setAltitudeHover] = useState<number | null>(null);
+  const [isOverlayLoading, setIsOverlayLoading] = useState(false);
 
   // Effect to handle overlay mode changes
   useEffect(() => {
@@ -1082,6 +1221,14 @@ export default function GlobeWindMap() {
 
   return (
     <>
+      {/* Loading indicator for overlay */}
+      {isOverlayLoading && (airModeEnabled || overlayMode === 'temperature') && (
+        <div className="fixed top-6 right-6 z-20 bg-white/10 backdrop-blur-lg rounded-full px-4 py-2 border border-white/20 text-white text-sm shadow-lg flex items-center gap-2">
+          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+          <span>Updating overlay...</span>
+        </div>
+      )}
+
       {/* Dashboard toggle button */}
       <button
         onClick={() => setDashOpen(!dashOpen)}
@@ -1111,6 +1258,9 @@ export default function GlobeWindMap() {
           {/* Overlay selector as pill toggle */}
           <div className="mb-2 flex items-center gap-2">
             <span className="mr-1 font-medium">Overlay</span>
+            {isOverlayLoading && (airModeEnabled || overlayMode === 'temperature') && (
+              <div className="w-3 h-3 border border-cyan-400/60 border-t-cyan-400 rounded-full animate-spin ml-1"></div>
+            )}
             <div className="flex gap-1" role="radiogroup" aria-label="Overlay selector">
               {["wind", "temperature", "none"].map(mode => (
                 <button
