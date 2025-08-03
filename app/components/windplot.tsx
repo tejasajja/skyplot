@@ -145,6 +145,7 @@ export default function GlobeWindMap() {
   >([]);
   const [lvlIdx, setLvlIdx] = useState(0);
   const [airModeEnabled, setAirModeEnabled] = useState(AIR_MODE_ENABLED);
+  const [overlayMode, setOverlayMode] = useState<'wind' | 'temperature' | 'none'>('wind');
   const [renderTrigger, setRenderTrigger] = useState(0);
   const gridMeta = useRef<GridMeta | null>(null);
   const tempGridMeta = useRef<GridMeta | null>(null);
@@ -324,6 +325,9 @@ export default function GlobeWindMap() {
   useEffect(() => {
     if (!wrap.current || !levels.length || !gridMeta.current) return;
 
+    // Capture the current value of wrap.current to avoid stale closure
+    const currentWrap = wrap.current;
+
     const { nx, lo1, la1, dx, dy } = gridMeta.current;
     const { U, V } = levels[lvlIdx];
 
@@ -332,7 +336,7 @@ export default function GlobeWindMap() {
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setClearColor(0x000000, 1);
     renderer.domElement.style.cssText = "position:absolute;inset:0";
-    wrap.current.appendChild(renderer.domElement);
+    currentWrap.appendChild(renderer.domElement);
 
     const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
     camera.position.set(0, 0, 450);
@@ -345,13 +349,10 @@ export default function GlobeWindMap() {
     controls.zoomSpeed = 1.0; // More controlled zoom
     controls.rotateSpeed = 0.8; // Slightly slower for more precise control
 
-    // Simplified movement detection using controls events only
-    let controlsChangeTimeout: NodeJS.Timeout;
-
     // --------------- WIND TRAILS CANVAS --------------- //
     const windCanvas = document.createElement("canvas");
     windCanvas.style.cssText = "position:absolute;inset:0;pointer-events:none";
-    wrap.current.appendChild(windCanvas);
+    currentWrap.appendChild(windCanvas);
 
     const ctx = windCanvas.getContext("2d")!;
     ctx.lineWidth = 1.0; // Slightly thinner for cleaner look
@@ -370,7 +371,7 @@ export default function GlobeWindMap() {
     // --------------- WIND SPEED OVERLAY CANVAS --------------- //
     const overlayCanvas = document.createElement("canvas");
     overlayCanvas.style.cssText = "position:absolute;inset:0;pointer-events:none;transition:opacity 0.1s ease-out";
-    wrap.current.appendChild(overlayCanvas);
+    currentWrap.appendChild(overlayCanvas);
 
     const overlayCtx = overlayCanvas.getContext("2d")!;
 
@@ -386,7 +387,7 @@ export default function GlobeWindMap() {
 
     // --------------- RESIZE HANDLER --------------- //
     const resize = () => {
-      const { offsetWidth: w, offsetHeight: h } = wrap.current!;
+      const { offsetWidth: w, offsetHeight: h } = currentWrap;
       renderer.setSize(w, h);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
@@ -1115,9 +1116,6 @@ export default function GlobeWindMap() {
 
     // --------------- CLEAN-UP --------------- //
     return () => {
-      // Capture the current value of wrap.current to avoid stale closure
-      const currentWrap = wrap.current;
-      
       if (raf) cancelAnimationFrame(raf);
       clearTimeout(moveTimeout);
       clearTimeout(fadeTimeout);
@@ -1129,7 +1127,7 @@ export default function GlobeWindMap() {
       currentWrap?.removeChild(windCanvas);
       currentWrap?.removeChild(overlayCanvas);
     };
-  }, [levels, lvlIdx, renderTrigger]);
+  }, [levels, lvlIdx, renderTrigger, airModeEnabled, overlayMode, tempLevels]);
 
   // ---- UI: air mode toggle ---- //
   // This function could be used for manual air mode toggling but is currently handled automatically
@@ -1141,7 +1139,6 @@ export default function GlobeWindMap() {
 
   // ---- UI: overlay mode selector ---- //
   const [dashOpen, setDashOpen] = useState(false);
-  const [overlayMode, setOverlayMode] = useState<'wind' | 'temperature' | 'none'>('wind');
   const [legendHover, setLegendHover] = useState<number | null>(null);
   const [altitudeHover, setAltitudeHover] = useState<number | null>(null);
   const [isOverlayLoading, setIsOverlayLoading] = useState(false);
